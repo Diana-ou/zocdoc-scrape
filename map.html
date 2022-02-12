@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+	<title>Primary Care Providers in NYC on Zocdoc</title>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+	<script src='https://api.tiles.mapbox.com/mapbox-gl-js/v1.0.0/mapbox-gl.js'></script>
+	<script src='https://cdnjs.cloudflare.com/ajax/libs/Turf.js/5.1.5/turf.min.js'></script>
+	<link href='https://api.tiles.mapbox.com/mapbox-gl-js/v1.0.0/mapbox-gl.css' rel='stylesheet' />
+	<script src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+
+	<style>
+		::-webkit-scrollbar {
+			width: 0px;
+			/* remove scrollbar space */
+			background: transparent;
+			/* optional: just make scrollbar invisible */
+		}
+
+		.info {
+			padding: 6px 8px;
+			font: 14px/16px Geneva, sans-serif;
+			background: white;
+			background: rgba(255, 255, 255, 0.8);
+			box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+			border-radius: 5px;
+			line-height: normal;
+		}
+
+		.info h4 {
+			margin: 0 0 5px;
+			color: #777;
+		}
+
+		.legend {
+			text-align: left;
+			line-height: 18px;
+			color: #555;
+		}
+
+		.legend i {
+			width: 18px;
+			height: 18px;
+			float: left;
+			margin-right: 8px;
+			opacity: 0.7;
+		}
+
+		body {
+			display: flex;
+		}
+
+		#select-menu {
+			position: absolute;
+			left: 50px;
+			top: 10px;
+			z-index: 10;
+		}
+
+		#map {
+			flex: 1.8;
+			height: calc(100vh - 30px);
+		}
+		#articlePlace {
+			flex: 1.2;
+			height: calc(100vh - 30px);
+			overflow: scroll;
+			margin: 15px;
+		}
+
+		#color-scale {
+			position: absolute;
+			bottom: 40px;
+			right: 10px;
+			z-index: 10;
+			background: rgba(255, 255, 255, 0.75);
+			padding: 5px;
+		}
+
+		#color-scale > div span {
+			display: inline-block;
+			height: 25px;
+			width: 20px;
+			margin-right: 5px;
+			vertical-align: middle;
+		}
+
+		#color-scale p {
+			font-weight: bold;
+			padding-bottom: 5px;
+			margin: 0;
+		}
+
+	</style>
+
+</head>
+<body>
+
+
+	<div id='map'>
+		<!--<div id="dropdown">
+			<select id="select-menu">
+				<option value="">All Groups</option>
+			</select>
+		</div>-->
+		<div id='color-scale'>
+			<p>Upcoming<br>available<br>appointments</p>
+			<div><span style='background-color: #B8F1F5'></span>3</div>
+			<div><span style='background-color: #A7E3F5'></span>6</div>
+			<div><span style='background-color: #69AEDB'></span>10</div>
+			<div><span style='background-color: #6CA7F5'></span>20</div>
+			<div><span style='background-color: #6487E8'></span>35</div>
+		</div>
+
+	</div>
+	<div id='articlePlace' class=info> 
+		<h1>Primary Care Providers on Zocdoc</h1>
+		<h3>Julia Ingram</h3>
+		<p>This map displays primary care providers in New York City offering in-person care on the medical 
+			appointment scheduling platform Zocdoc.</p>
+		<p></p>
+		<p>Click on a zip code to see how many appointments are available in the next five days and to view 
+			information about the providers that have offices there.</p>
+		<p></p>
+		<p><a href='https://www.zocdoc.com'>Visit Zocdoc.com</a> to make an appointment with these providers.</p>
+		<p></p>
+		<h5>Data as of December 10, 2021, 7 PM EST</h5>
+	</div>
+
+	<script type="text/javascript" src="geo-data.js"></script>
+
+
+	<script type="text/javascript">
+
+		mapboxgl.accessToken = 'pk.eyJ1IjoianVsaWFpbmdyYW0iLCJhIjoiY2t3d2d6MGQ0MDNqbTJwbGM0NndvN3hxayJ9.99_9XH0Yyi4ejYRE19Tgjw';
+
+		var map = new mapboxgl.Map({
+			container: 'map', // HTML container ID
+			style: 'mapbox://styles/mapbox/light-v10', // style URL
+			center: [-73.96575329549717,40.689340041041135], // starting position as [lng, lat]
+			zoom: 9.75
+		});
+		map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+
+// all of this JavaScript manages what's displayed on hover and click
+
+		var popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false });
+
+		let hoverCurrentId = null
+		var datalayer;
+
+		function updateArticle(e) {
+			let feature = e.features[0]
+			document.getElementById("articlePlace").innerHTML = feature.properties.article
+		}
+
+		function startHover(e) {
+			let feature = e.features[0]
+
+			if (hoverCurrentId) {
+				map.setFeatureState({ source: 'datalayer', id: hoverCurrentId }, { hover: false });
+			}
+			hoverCurrentId = feature.id
+			map.setFeatureState({ source: 'datalayer', id: hoverCurrentId }, { hover: true });
+		}
+
+		function stopHover(e) {
+			if (hoverCurrentId) {
+				map.setFeatureState({ source: 'datalayer', id: hoverCurrentId }, { hover: false });
+			}
+			hoverCurrentId = null;
+		}
+
+		function drawPopup(e) {
+			let feature = e.features[0]
+			map.getCanvas().style.cursor = 'pointer';
+
+			var coordinates = e.lngLat;//turf.centerOfMass(feature);
+			var headline = feature.properties.headline;
+
+			while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+				coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+			}
+
+			popup.setLngLat(coordinates)
+				.setHTML(`<h4>${headline}</h4>`)
+				.addTo(map);
+		}
+
+		function removePopup(e) {
+			map.getCanvas().style.cursor = '';
+			popup.remove();
+		}
+
+		map.on('load', function () {
+			for (let i = 0; i < infoData.features.length; i++) {
+				infoData.features[i]['id'] = i + 1
+			}
+
+			datalayer = map.addLayer({
+				id: "datalayer",
+				type: "fill",
+				source: {
+					type: "geojson",
+					data: infoData, 
+				},
+				paint: {
+					'fill-color': ['get', 'color'],
+
+					// 'fill-color': [
+// 						'interpolate', ['linear'],
+// 						["to-number", ["get", "rating"]],  
+// 						1, "#ece2f0", 
+// 						5, "#a6bddb",
+// 						10, "#1c9099" 
+// 					],
+
+					'fill-outline-color': 'white',
+					'fill-opacity': [
+						'case',
+						['boolean', ['feature-state', 'hover'], false],
+						1,
+						0.5
+					]
+				}
+			});
+
+// these functions control Mouse actions
+// they make the pop-up headline or update the article text
+			map.on('mousemove', 'datalayer', function (e) {
+				startHover(e)
+				drawPopup(e)
+			});
+
+			// When we move the mouse away from a point, turn off the hovering and popup
+			map.on('mouseleave', 'datalayer', function (e) {
+				stopHover(e)
+				removePopup(e)
+			});
+
+			// When we click, update the article (the right-hand side)
+			map.on('click', 'datalayer', function (e) {
+				updateArticle(e)
+			})
+// very important!! this automatically centers the map and zooms it
+//			map.fitBounds(turf.bbox(infoData), { padding: 0, linear: true })
+		})
+
+
+	</script>
+	<script>
+	// this part is J query / with some mapbox JavaScript
+	// it changes what is displayed based on the pulldown menu
+
+		var groupsObj = {};
+
+		$(document).ready(function () {
+			infoData.features.forEach(function (feature) {
+				groupsObj[feature.properties.group_id] = feature.properties.group_name;
+			})
+
+			$.each(groupsObj, function (key, value) {
+				$('#select-menu')
+					.append($("<option></option>")
+						.attr("value", value)
+						.text(value));
+			});
+
+			$('#select-menu').change(function () {
+				var selectedGroup = $('#select-menu').val();
+
+				if (!selectedGroup) {
+					map.setFilter('datalayer', null);
+				} else {
+					map.setFilter('datalayer', ['==', ['get', 'group_name'], selectedGroup]);
+				}
+			});
+		});
+	</script>
+
+
+</body>
+
+</html>
